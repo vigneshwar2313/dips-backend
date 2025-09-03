@@ -26,29 +26,55 @@ def send_otp():
     if not re.match(r"^\+\d{6,15}$", number):
         return jsonify({"error": "Mobile number must include country code"}), 400
 
-    check_response = requests.post(CHECK_API_URL, json={"number": number})
-    if check_response.status_code != 200:
-        return jsonify({"error": "Failed to check number"}), 500
-    
-    check_data = check_response.json()
+    conn = None
+    try:
+        conn = get_pg_connection()
+        cur = conn.cursor()
 
-    if not check_data.get("success") or not check_data.get("exists"):
-        return jsonify({"error": "Number is not a valid WhatsApp number"}), 400
-    
-    jid = check_data.get("jid")
+        cur.execute("""
+            SELECT id FROM dips.user_otps
+            WHERE mobile = %s AND is_verified = TRUE
+            ORDER BY created_at DESC LIMIT 1;
+        """, (number,))
+        otp_verified = cur.fetchone()
 
-    otp = generate_otp()
-    expires_at = datetime.utcnow() + timedelta(minutes=5)
+        cur.execute("""
+            SELECT id FROM dips.users
+            WHERE phone = %s;
+        """, (number,))
+        user_exists = cur.fetchone()
 
-    conn = get_pg_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO dips.user_otps (mobile, otp, mb_id, expires_at)
-        VALUES (%s, %s, %s, %s);
-    """, (number, otp, mb_id, expires_at))
-    conn.commit()
-    cur.close()
-    conn.close()
+        if otp_verified or user_exists:
+            return jsonify({"error": "Number already verified or registered"}), 400
+
+        check_response = requests.post(CHECK_API_URL, json={"number": number})
+        if check_response.status_code != 200:
+            return jsonify({"error": "Failed to check number"}), 500
+        
+        check_data = check_response.json()
+        if not check_data.get("success") or not check_data.get("exists"):
+            return jsonify({"error": "Number is not a valid WhatsApp number"}), 400
+        
+        jid = check_data.get("jid")
+
+        otp = generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=5)
+
+        cur.execute("""
+            INSERT INTO dips.user_otps (mobile, otp, mb_id, expires_at)
+            VALUES (%s, %s, %s, %s);
+        """, (number, otp, mb_id, expires_at))
+        conn.commit()
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+    finally:
+        if conn:
+            cur.close()
+            conn.close()
 
     requests.post(SEND_API_URL, json={
         "recipient": jid,
