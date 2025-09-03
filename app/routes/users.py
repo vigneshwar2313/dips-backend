@@ -32,20 +32,20 @@ def send_otp():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT id FROM dips.user_otps
-            WHERE mobile = %s AND is_verified = TRUE
-            ORDER BY created_at DESC LIMIT 1;
-        """, (number,))
-        otp_verified = cur.fetchone()
-
-        cur.execute("""
-            SELECT id FROM dips.users
+            SELECT id, name, email, phone, role FROM dips.users
             WHERE phone = %s;
         """, (number,))
         user_exists = cur.fetchone()
 
-        if otp_verified or user_exists:
-            return jsonify({"error": "Number already verified or registered"}), 400
+        if user_exists:
+            return jsonify({
+                "message": "Mobile Number already registered",
+                "user_id": user_exists[0],
+                "name": user_exists[1],
+                "email": user_exists[2],
+                "phone": user_exists[3],
+                "role": user_exists[4],
+            }), 200
 
         check_response = requests.post(CHECK_API_URL, json={"number": number})
         if check_response.status_code != 200:
@@ -53,7 +53,7 @@ def send_otp():
         
         check_data = check_response.json()
         if not check_data.get("success") or not check_data.get("exists"):
-            return jsonify({"error": "Number is not a valid WhatsApp number"}), 400
+            return jsonify({"message": "Number is not a valid WhatsApp number"}), 400
         
         jid = check_data.get("jid")
 
