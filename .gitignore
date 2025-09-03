@@ -1,0 +1,15 @@
+
+# git
+.git
+
+#venv
+/dipsenv
+
+#logs
+logs.log
+
+#env
+.env
+
+__pycache__/
+*.pyc
